@@ -12,7 +12,7 @@
     {"axis": "liancheng", "stop": "台貿一村", "route": "214直", "city": "Taipei", "direction": 0, "StopUID": "TPE30580", "seq": 6, "walk_from_origin_m": 545},
     {"axis": "liancheng", "stop": "連城中正路口", "route": "214", "city": "Taipei", "direction": 0, "StopUID": "TPE30423", "seq": 4, "walk_from_origin_m": 256},
     {"axis": "liancheng", "stop": "台貿一村", "route": "214", "city": "Taipei", "direction": 0, "StopUID": "TPE30425", "seq": 6, "walk_from_origin_m": 545},
-    {"axis": "liancheng", "stop": "連城中正路口", "route": "捷運頂溪站-捷運頂埔站", "city": "NewTaipei", "direction": 1, "StopUID": "NWT207493", "seq": 19, "walk_from_origin_m": 256, "note": "跳蛙;班表僅平日 16:10/17:00 往頂埔(dir 0),往頂溪方向無晚間班次 → 下班場景不可用"},
+    {"axis": "liancheng", "stop": "連城中正路口", "route": "捷運頂溪站-捷運頂埔站", "city": "NewTaipei", "direction": 1, "StopUID": "NWT207493", "seq": 19, "walk_from_origin_m": 256, "note": "跳蛙;TDX 班表缺往頂溪方向,10 天歷史實測每天傍晚 3 班約 17:33/18:05/18:55 通過本站,可搭但車程與 57 相當、無速度優勢"},
     {"axis": "jinhe", "stop": "錦和路", "route": "橘3", "city": "NewTaipei", "direction": 0, "StopUID": "NWT127562", "seq": 2, "walk_from_origin_m": 373},
     {"axis": "jinhe", "stop": "建一路", "route": "橘3", "city": "NewTaipei", "direction": 0, "StopUID": "NWT127563", "seq": 3, "walk_from_origin_m": 146, "note": "比錦和路更近銀行且站序較後 → 錦和路軸應一律走建一路"}
   ],

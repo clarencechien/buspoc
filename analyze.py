@@ -35,7 +35,18 @@ HEADWAY_TARGETS = [
     ("243", "NWT10172", "NWT34492", "台貿一村"),
 ]
 ORANGE3 = ("橘3", "NWT16466")
-ORANGE3_STOPS = {"NWT127562": "錦和路", "NWT127563": "建一路", "NWT127574": "仁愛路(一)"}
+# 跳蛙 (捷運頂溪站-捷運頂埔站) toward 頂溪 = Direction 1; TDX has no published
+# timetable for this direction, so reconstruct the de-facto one from events.
+FROG = ("跳蛙", "NWT18538")
+FROG_STOP = ("NWT207493", "連城中正路口")
+ORANGE3_STOPS = {"NWT127562": "錦和路", "NWT127563": "建一路"}
+ORANGE3_RIDE = ("NWT127563", "NWT127574")  # 建一路 → 仁愛路(一) in-vehicle time
+RIDE_PAIRS = {
+    "橘3 建一路→仁愛路(一)": ("NWT16466", "NWT127563", "NWT127574"),
+    "57 連城中正路口→捷運頂溪站": ("NWT16468", "NWT127715", "NWT127730"),
+    "706 連城中正路口→捷運頂溪站": ("NWT10196", "NWT35122", "NWT35134"),
+    "跳蛙 連城中正路口→捷運頂溪站": ("NWT18538", "NWT207493", "NWT207499"),
+}
 ORANGE3_SCHED_EVENING = ["17:00", "17:20", "17:50", "18:20", "19:00", "19:40", "20:20"]
 
 WIN_START, WIN_END = (16, 45), (19, 45)  # local sampling window
@@ -46,11 +57,13 @@ def load_arrivals(paths):
     """→ {(RouteUID, StopUID): {date: sorted [datetime]}} deduped per trip."""
     seen = set()
     arr = defaultdict(lambda: defaultdict(list))
+    trips = defaultdict(dict)  # (plate, TripStartTime) -> {StopUID: datetime}
     for p in paths:
         with open(p, encoding="utf-8-sig") as f:
             for line in f:
                 r = json.loads(line)
-                if r.get("A2EventType") != 1 or r.get("Direction") != 0:
+                want_dir = 1 if r["RouteUID"] == FROG[1] else 0
+                if r.get("A2EventType") != 1 or r.get("Direction") != want_dir:
                     continue
                 key_ids = (r["RouteUID"], r["StopUID"])
                 t = datetime.fromisoformat(r["GPSTime"]).astimezone(TZ)
@@ -59,10 +72,13 @@ def load_arrivals(paths):
                     continue
                 seen.add(trip)
                 arr[key_ids][t.date()].append(t)
+                for _label, (ruid, a, b) in RIDE_PAIRS.items():
+                    if r["RouteUID"] == ruid and r["StopUID"] in (a, b):
+                        trips[(r.get("PlateNumb"), r.get("TripStartTime"))][r["StopUID"]] = t
     for v in arr.values():
         for lst in v.values():
             lst.sort()
-    return arr
+    return arr, trips
 
 
 def in_win(t, start, end):
@@ -96,7 +112,7 @@ def main():
     paths = sys.argv[1:]
     if not paths:
         sys.exit("usage: analyze.py hist/rtns_*.ndjson")
-    arr = load_arrivals(paths)
+    arr, trips = load_arrivals(paths)
     dates = sorted({d for v in arr.values() for d in v})
     print(f"days analyzed: {[str(d) for d in dates]}\n")
 
@@ -151,6 +167,33 @@ def main():
         else:
             print(f"橘3 @ {name}: no matches")
     result["orange3"] = o3
+
+    print("\n== in-vehicle times, boarding 16:45–19:45 ==")
+    result["ride_times"] = {}
+    for label, (ruid, a, b) in RIDE_PAIRS.items():
+        rides = sorted(
+            (v[b] - v[a]).total_seconds() / 60
+            for v in trips.values()
+            if a in v and b in v and timedelta() < v[b] - v[a] < timedelta(minutes=45)
+            and in_win(v[a], WIN_START, WIN_END)
+        )
+        if rides:
+            n = len(rides)
+            result["ride_times"][label] = {
+                "n": n,
+                "p50": round(statistics.median(rides), 1),
+                "p90": round(rides[int(0.9 * (n - 1))], 1),
+            }
+            print(f"{label}: {result['ride_times'][label]}")
+
+    print("\n== Bonus: 跳蛙 (往頂溪, dir 1) actual passages at 連城中正路口, 15:00–20:00 ==")
+    frog_days = arr.get((FROG[1], FROG_STOP[0]), {})
+    frog_out = {}
+    for d in dates:
+        times = [t.strftime("%H:%M") for t in frog_days.get(d, []) if in_win(t, (15, 0), (20, 0))]
+        frog_out[str(d)] = times
+        print(f"  {d}: {times}")
+    result["frog_passages"] = frog_out
 
     with open("phase3_result.json", "w") as f:
         json.dump(result, f, ensure_ascii=False, indent=1)

@@ -27,6 +27,7 @@ KEEP_MARKERS = [
     '"RouteUID":"NWT16468"',  # 57
     '"RouteUID":"NWT10196"',  # 706
     '"RouteUID":"NWT10172"',  # 243
+    '"RouteUID":"NWT18538"',  # 跳蛙 捷運頂溪站-捷運頂埔站
 ]
 
 OUT_DIR = os.environ.get("HIST_DIR", "hist")
