@@ -1,0 +1,27 @@
+{
+  "_comment": "Task 1.1 output — pinned StopUIDs for the boarding direction (中和→永和, evening commute). NWT stop UIDs are per-route in New Taipei data: the same physical pole has a different StopUID in each route's StopOfRoute/RealTime data, so every (route, stop) pair is listed. Distances are haversine from the fixture coordinates.",
+  "origin": {"name": "第一銀行連城分行", "lat": 24.99663, "lon": 121.48691},
+  "destination": {"name": "臺灣銀行新永和分行", "lat": 25.01309, "lon": 121.51276},
+  "boarding": [
+    {"axis": "liancheng", "stop": "連城中正路口", "route": "57", "city": "NewTaipei", "direction": 0, "StopUID": "NWT127715", "seq": 22, "walk_from_origin_m": 256},
+    {"axis": "liancheng", "stop": "台貿一村", "route": "57", "city": "NewTaipei", "direction": 0, "StopUID": "NWT127717", "seq": 23, "walk_from_origin_m": 545},
+    {"axis": "liancheng", "stop": "連城中正路口", "route": "706", "city": "NewTaipei", "direction": 0, "StopUID": "NWT35122", "seq": 58, "walk_from_origin_m": 256},
+    {"axis": "liancheng", "stop": "台貿一村", "route": "706", "city": "NewTaipei", "direction": 0, "StopUID": "NWT35124", "seq": 59, "walk_from_origin_m": 545},
+    {"axis": "liancheng", "stop": "台貿一村", "route": "243", "city": "NewTaipei", "direction": 0, "StopUID": "NWT34492", "seq": 4, "walk_from_origin_m": 545, "note": "243 不停連城中正路口"},
+    {"axis": "liancheng", "stop": "連城中正路口", "route": "214直", "city": "Taipei", "direction": 0, "StopUID": "TPE30578", "seq": 4, "walk_from_origin_m": 256},
+    {"axis": "liancheng", "stop": "台貿一村", "route": "214直", "city": "Taipei", "direction": 0, "StopUID": "TPE30580", "seq": 6, "walk_from_origin_m": 545},
+    {"axis": "liancheng", "stop": "連城中正路口", "route": "214", "city": "Taipei", "direction": 0, "StopUID": "TPE30423", "seq": 4, "walk_from_origin_m": 256},
+    {"axis": "liancheng", "stop": "台貿一村", "route": "214", "city": "Taipei", "direction": 0, "StopUID": "TPE30425", "seq": 6, "walk_from_origin_m": 545},
+    {"axis": "liancheng", "stop": "連城中正路口", "route": "捷運頂溪站-捷運頂埔站", "city": "NewTaipei", "direction": 1, "StopUID": "NWT207493", "seq": 19, "walk_from_origin_m": 256, "note": "跳蛙;班表僅平日 16:10/17:00 往頂埔(dir 0),往頂溪方向無晚間班次 → 下班場景不可用"},
+    {"axis": "jinhe", "stop": "錦和路", "route": "橘3", "city": "NewTaipei", "direction": 0, "StopUID": "NWT127562", "seq": 2, "walk_from_origin_m": 373},
+    {"axis": "jinhe", "stop": "建一路", "route": "橘3", "city": "NewTaipei", "direction": 0, "StopUID": "NWT127563", "seq": 3, "walk_from_origin_m": 146, "note": "比錦和路更近銀行且站序較後 → 錦和路軸應一律走建一路"}
+  ],
+  "alighting": [
+    {"route": "57", "best": {"stop": "捷運頂溪站", "StopUID": "NWT127730", "seq": 34, "walk_to_dest_m": 259}, "others": [{"stop": "樂華夜市", "seq": 33, "walk_to_dest_m": 522}, {"stop": "竹林路口", "seq": 35, "walk_to_dest_m": 494}]},
+    {"route": "706", "best": {"stop": "捷運頂溪站", "StopUID": "NWT35134", "seq": 68, "walk_to_dest_m": 259}, "others": [{"stop": "中山路口", "seq": 67, "walk_to_dest_m": 283}]},
+    {"route": "243", "best": {"stop": "文化路", "StopUID": "NWT34504", "seq": 16, "walk_to_dest_m": 277}, "others": [{"stop": "頂溪國小", "seq": 15, "walk_to_dest_m": 335}]},
+    {"route": "214直", "best": {"stop": "捷運頂溪站", "StopUID": "TPE30593", "seq": 20, "walk_to_dest_m": 259}, "others": [{"stop": "中正橋頭", "seq": 21, "walk_to_dest_m": 479}]},
+    {"route": "214", "best": {"stop": "中正橋頭", "StopUID": "TPE30446", "seq": 27, "walk_to_dest_m": 479}, "others": [{"stop": "竹林路口", "seq": 26, "walk_to_dest_m": 513}]},
+    {"route": "橘3", "best": {"stop": "仁愛路(一)", "StopUID": "NWT127574", "seq": 15, "walk_to_dest_m": 100}, "others": [{"stop": "仁愛路", "seq": 16, "walk_to_dest_m": 182}, {"stop": "捷運頂溪站", "seq": 35, "walk_to_dest_m": 259}]}
+  ]
+}
