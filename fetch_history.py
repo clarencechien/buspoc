@@ -10,6 +10,7 @@ the full payload.
 Usage: TDX_CLIENT_ID=... TDX_CLIENT_SECRET=... python3 fetch_history.py 2026-07-21 2026-07-22 ...
 Output: hist/rtns_<date>.ndjson (only kept routes)
 """
+import http.client
 import json
 import os
 import sys
@@ -89,6 +90,13 @@ def fetch_day(token, date):
                 time.sleep(delay)
                 continue
             raise
+        except (http.client.IncompleteRead, ConnectionError, TimeoutError, urllib.error.URLError) as e:
+            # stream cut mid-download; restart the day from scratch
+            if os.path.exists(out_path + ".part"):
+                os.remove(out_path + ".part")
+            delay = 15 * (attempt + 1)
+            print(f"{date}: stream broke ({type(e).__name__}), retry in {delay}s")
+            time.sleep(delay)
     print(f"{date}: gave up", file=sys.stderr)
 
 
