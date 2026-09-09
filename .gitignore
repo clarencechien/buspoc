@@ -3,3 +3,5 @@ phase1_result.json
 *.token
 __pycache__/
 data/
+.env
+.env.*

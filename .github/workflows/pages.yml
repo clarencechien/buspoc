@@ -1,0 +1,35 @@
+name: Deploy bus map to GitHub Pages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm test && npm run check
+      - name: Apply public deployment configuration
+        env:
+          # Only a public pk.* token may be exposed in the Pages artifact.
+          MAPBOX_TOKEN: ${{ vars.MAPBOX_PUBLIC_TOKEN || secrets.MAPBOX_PUBLIC_TOKEN }}
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; const token=process.env.MAPBOX_TOKEN || ''; if(token && !token.startsWith('pk.')) throw Error('Only a public Mapbox pk.* token is allowed'); fs.writeFileSync('web/config.js', 'window.BUSPOC_CONFIG = '+JSON.stringify({token})+';');"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
