@@ -3,30 +3,18 @@ import {matchShape,chooseStops,stopPoint,etaText} from './corridor.js';
 import {selectionKey} from './storage.js';
 import {distance,validPoint} from './core.js';
 const $=s=>document.querySelector(s),empty=()=>({type:'FeatureCollection',features:[]});
-export function setupCorridor(getSettings,getToken,getMap,colorOf,onError){
+export function setupCorridor(getSettings,getToken,getMap,colorOf,onError,overlays){
   let records=[],shapes=[],activeStops=[],line=[],currentRoute=null,controller=null,version=0,stopMarkers=[];
   let pins=null;fetch('./commute-stops.json').then(r=>r.json()).then(d=>pins=d).catch(()=>{});
   function clearMap(){stopMarkers.forEach(m=>m.remove());stopMarkers=[];const m=getMap();for(const id of ['commute-line','commute-stops'])m?.getSource(id)?.setData(empty());line=[];}
   function draw(){
-    const m=getMap();if(!m?.isStyleLoaded()||!activeStops.length||!currentRoute)return;
+    const m=getMap();if(!activeStops.length||!currentRoute)return;
     const a=Number($('#board-stop').value),b=Number($('#alight-stop').value);clearMap();
     if(b<=a){$('#corridor-status').textContent='下車站必須位於上車站之後，請調整站點或方向。';return;}
     const direction=Number($('#corridor-direction').value),record=records.find(r=>r.Direction===direction&&r.Stops===activeStops);
     line=matchShape(shapes,record||{Direction:direction},activeStops.slice(a,b+1));
-    const color=colorOf(currentRoute);
-    const routeData={type:'FeatureCollection',features:line.length?[{type:'Feature',properties:{color},geometry:{type:'LineString',coordinates:line}}]:[]};
-    const stopsData={type:'FeatureCollection',features:activeStops.slice(a,b+1).map((s,i)=>({type:'Feature',properties:{color,label:i===0?'上車 · '+s.StopName.Zh_tw:i===b-a?'下車 · '+s.StopName.Zh_tw:s.StopName.Zh_tw,edge:i===0||i===b-a},geometry:{type:'Point',coordinates:[stopPoint(s).lon,stopPoint(s).lat]}}))};
-    if(!m.getSource('commute-line')){
-      m.addSource('commute-line',{type:'geojson',data:empty()});m.addSource('commute-stops',{type:'geojson',data:empty()});
-      m.addLayer({id:'commute-glow',type:'line',slot:'top',source:'commute-line',paint:{'line-color':['get','color'],'line-width':24,'line-opacity':.45,'line-blur':5}});
-      m.addLayer({id:'commute-outline',type:'line',slot:'top',source:'commute-line',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#fff','line-width':14}});
-      m.addLayer({id:'commute-path',type:'line',slot:'top',source:'commute-line',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':['get','color'],'line-width':9,'line-opacity':1,'line-emissive-strength':1}});
-      m.addLayer({id:'commute-stop-dots',type:'circle',slot:'top',source:'commute-stops',paint:{'circle-radius':['case',['get','edge'],8,4],'circle-color':['get','color'],'circle-stroke-color':'#ffffff','circle-stroke-width':2}});
-      m.addLayer({id:'commute-stop-labels',type:'symbol',slot:'top',source:'commute-stops',layout:{'text-field':['get','label'],'text-size':13,'text-offset':[0,1.5]},paint:{'text-color':['get','color'],'text-halo-color':'#fff','text-halo-width':2}});
-    }
-    for(const [index,label] of [[a,'上車'],[b,'下車']]){const stop=activeStops[index],el=document.createElement('div');el.className='stop-flag';el.style.setProperty('--route',color);el.textContent=label+' · '+stop.StopName.Zh_tw;stopMarkers.push(new mapboxgl.Marker({element:el,anchor:'bottom',offset:[0,-12]}).setLngLat([stopPoint(stop).lon,stopPoint(stop).lat]).addTo(m));}
+    overlays?.setSegment(currentRoute,{line,stops:activeStops.slice(a,b+1),direction});
     try{localStorage.setItem(selectionKey,JSON.stringify({route:currentRoute.city+':'+currentRoute.name,direction,board:activeStops[a].StopUID,alight:activeStops[b].StopUID,od:JSON.stringify([getSettings().origin,getSettings().destination])}));}catch{}
-    m.getSource('commute-line').setData(routeData);m.getSource('commute-stops').setData(stopsData);
     $('#corridor-status').textContent=`${currentRoute.name} · ${activeStops[a].StopName.Zh_tw} → ${activeStops[b].StopName.Zh_tw} · ${b-a+1} 站。${line.length?'實際路線區段。':'未取得可匹配的道路線形；僅顯示站點。'}`;
   }
   function stationOptions(){
@@ -48,22 +36,22 @@ export function setupCorridor(getSettings,getToken,getMap,colorOf,onError){
   $('#load-corridor').onclick=async()=>{
     reset();const route=getSettings().routes[Number($('#corridor-route').value)];if(!route)return;
     const token=getToken(),id=version;currentRoute=route;const cacheKey='buspoc-route-v1:'+route.city+':'+route.name;
-    try{const cached=JSON.parse(localStorage.getItem(cacheKey)||'null');if(cached&&Array.isArray(cached.records)&&Array.isArray(cached.shapes)){records=cached.records;shapes=cached.shapes;stationOptions();if(Date.now()-cached.time>86400000)$('#corridor-status').textContent+=' 快取超過一天，建議更新路線。';return;}}catch{}
+    try{const cached=JSON.parse(localStorage.getItem(cacheKey)||'null')||overlays?.cache(route);if(cached&&Array.isArray(cached.records)&&Array.isArray(cached.shapes)){records=cached.records;shapes=cached.shapes;stationOptions();if(Date.now()-cached.time>86400000)$('#corridor-status').textContent+=' 快取超過一天，建議更新路線。';return;}}catch{}
     if(!token){$('#corridor-status').textContent='請先在設定輸入 TDX Token。';return;}
     controller=new AbortController();const activeController=controller;const signal=activeController.signal;const timer=setTimeout(()=>activeController.abort(),45000);$('#load-corridor').disabled=true;$('#corridor-status').textContent='正在依序讀取站點與路線…';
     try{
       const stops=await tdxQuery('StopOfRoute',route,token,signal);if(id!==version)return;
       records=stops.filter(r=>r.RouteName?.Zh_tw===route.name).map(r=>({...r,Stops:(r.Stops||[]).filter(s=>validPoint(stopPoint(s))).sort((a,b)=>a.StopSequence-b.StopSequence)}));
       let shapeFailed=false;try{shapes=await tdxQuery('Shape',route,token,signal);}catch(e){shapeFailed=true;onError(e.status);shapes=[];}if(id!==version)return;
-      if(!shapeFailed)try{localStorage.setItem(cacheKey,JSON.stringify({time:Date.now(),records,shapes}));}catch{}
+      overlays?.render();if(!shapeFailed)try{localStorage.setItem(cacheKey,JSON.stringify({time:Date.now(),records,shapes}));}catch{}
       stationOptions();
     }catch(e){if(id===version){$('#corridor-status').textContent=errorLabel(e.status);onError(e.status);}}
     finally{clearTimeout(timer);if(id===version)$('#load-corridor').disabled=false;}
   };
   $('#reload-corridor').onclick=()=>{const r=getSettings().routes[Number($('#corridor-route').value)];if(r){try{localStorage.removeItem('buspoc-route-v1:'+r.city+':'+r.name);}catch{}$('#load-corridor').click();}};
-  $('#corridor-route').onchange=reset;$('#corridor-direction').onchange=()=>{version++;controller?.abort();$('#get-eta').disabled=false;$('#load-corridor').disabled=false;stationOptions();};
+  $('#corridor-route').onchange=()=>{$('#load-corridor').click();};$('#corridor-direction').onchange=()=>{version++;controller?.abort();$('#get-eta').disabled=false;$('#load-corridor').disabled=false;stationOptions();};
   for(const id of ['board-stop','alight-stop'])$('#'+id).onchange=()=>{version++;controller?.abort();$('#get-eta').disabled=false;$('#eta-status').textContent='站點變更後請重新查詢到站預估。';draw();};
-  $('#route-fit').onclick=()=>{if(!line.length)return;const m=getMap();if(m)m.fitBounds(line.reduce((b,p)=>b.extend(p),new mapboxgl.LngLatBounds()),{padding:80,maxZoom:16,pitch:55});};
+  $('#route-fit').onclick=()=>overlays?.fit();
   $('#get-eta').onclick=async()=>{const stop=activeStops[Number($('#board-stop').value)];if(!stop||!getToken()){$('#eta-status').textContent='請先載入路線與設定 Token。';return;}const id=version;const direction=Number($('#corridor-direction').value);controller?.abort();const c=new AbortController();controller=c;const timer=setTimeout(()=>c.abort(),30000);$('#get-eta').disabled=true;$('#eta-status').textContent='查詢官方到站預估…';try{const data=await tdxQuery('EstimatedTimeOfArrival',currentRoute,getToken(),c.signal);if(id===version)$('#eta-status').textContent=etaText(data,stop,direction)+' · '+new Date().toLocaleTimeString('zh-TW');}catch(e){if(id===version){$('#eta-status').textContent=errorLabel(e.status);onError(e.status);}}finally{clearTimeout(timer);if(id===version)$('#get-eta').disabled=false;}};
   configure();return {configure,draw,reset};
 }
