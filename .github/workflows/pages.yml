@@ -22,10 +22,10 @@ jobs:
       - run: npm test && npm run check
       - name: Apply public deployment configuration
         env:
-          MAPBOX_TOKEN: ${{ vars.MAPBOX_PUBLIC_TOKEN }}
-          BUS_API: ${{ vars.BUS_API_URL }}
+          # Only a public pk.* token may be exposed in the Pages artifact.
+          MAPBOX_TOKEN: ${{ vars.MAPBOX_PUBLIC_TOKEN || secrets.MAPBOX_PUBLIC_TOKEN }}
         run: |
-          node --input-type=module -e "import fs from 'node:fs'; fs.writeFileSync('web/config.js', 'window.BUSPOC_CONFIG = '+JSON.stringify({token:process.env.MAPBOX_TOKEN || '',api:process.env.BUS_API || ''})+';');"
+          node --input-type=module -e "import fs from 'node:fs'; const token=process.env.MAPBOX_TOKEN || ''; if(token && !token.startsWith('pk.')) throw Error('Only a public Mapbox pk.* token is allowed'); fs.writeFileSync('web/config.js', 'window.BUSPOC_CONFIG = '+JSON.stringify({token})+';');"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

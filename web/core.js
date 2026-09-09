@@ -2,7 +2,7 @@ export const defaults = {
   origin: {name:'第一銀行連城分行',lat:24.99663,lon:121.48691},
   destination: {name:'臺灣銀行新永和分行',lat:25.01309,lon:121.51276},
   routes: ['57','706','243','214直','橘3'].map(name=>({name,city:name==='214直'?'Taipei':'NewTaipei'})),
-  token:'', api:''
+  token:''
 };
 export function distance(a,b) {
   const r=Math.PI/180, dlat=(b.lat-a.lat)*r, dlon=(b.lon-a.lon)*r;
@@ -17,7 +17,6 @@ export function validateSettings(s) {
   for(const r of s.routes) if(!['Taipei','NewTaipei'].includes(r.city)||typeof r.name!=='string'||!r.name.trim()||r.name.length>30||/[\x00-\x1f/?#]/.test(r.name)) throw Error('路線名稱或城市不正確。');
   if(new Set(s.routes.map(r=>r.city+':'+r.name)).size!==s.routes.length) throw Error('請移除重複路線。');
   if(s.token && !s.token.startsWith('pk.')) throw Error('Mapbox 請使用 pk. 開頭的公開 token。');
-  if(s.api) {let u;try{u=new URL(s.api);}catch{throw Error('代理 URL 格式不正確。');}if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash) throw Error('代理 URL 請使用無參數的 HTTPS 網址。');}
   return s;
 }
 export function ageSeconds(v,now=Date.now()) {const t=Date.parse(v.time);return Number.isFinite(t)?Math.max(0,(now-t)/1000):Infinity;}

@@ -1,6 +1,11 @@
 # Mapbox 3D 公車地圖 → PWA → WebAR 實作計畫
 日期：2026-09-09
 
+## 修訂：僅 GitHub Pages
+依使用者後續指示，取消 Cloudflare 與資料快照方案，改成瀏覽器輸入 TDX Access Token，直接請求 TDX。
+TDX token 僅存頁面記憶體；Actions 只支援注入 Mapbox 公開 token，不公開 TDX Secrets。
+2026-09-09 OPTIONS 預檢探測回傳 401 且無 CORS 允許標頭，真實直連受阻；保留前端直連能力與清楚錯誤提示，不宣稱已打通。詳見 MAPBOX_SETUP.md。
+
 ## 目標與預設
 先交付 GitHub Pages 靜態網頁。預設路線 57 / 706 / 243 / 214直 / 橘3；路線可增刪並指定 Taipei / NewTaipei。
 A：第一銀行連城分行 (24.99663, 121.48691)。
@@ -15,13 +20,13 @@ A/B 名稱與座標可編輯，儲存在本機；地圖可點選設定位置。
 - GPS 權限失敗可繼續使用 A；過期定位標示、不推算虛假移動。
 - 即時模式與明確標示的示範模式分離；無 API 不偽装即時。
 - 可編輯路線、A/B、Mapbox 公開 token、代理 URL；設定驗證及本機儲存。
-- TDX RealTimeByFrequency 經 Cloudflare Worker 代理，secret 僅在 Worker；來源限制、查詢驗證、短期快取、逾時及錯誤處理。
+- TDX RealTimeByFrequency 由瀏覽器直接請求；使用者貼 Access Token，僅存記憶體；支援逾時、401、403、429、CORS 錯誤提示。
 - GitHub Pages workflow 僅发布 web/；手動在本 branch 執行部署，避免改 main 與原站。
-- Node 測試距離、設定驗證、TDX 正規化、過期狀態與代理失敗行為。
+- Node 測試距離、設定驗證、TDX 正規化、過期狀態與直連失敗行為。
 
 ## 部署依賴
 Mapbox pk.* token（限制 GitHub Pages 網域）；不可放 sk.*。
-即時資料需要 Worker 的 TDX_CLIENT_ID / TDX_CLIENT_SECRET 及 ALLOWED_ORIGIN。
+即時資料需要使用者的有效 TDX Access Token，且 TDX 必須允許 CORS 預檢與 GET；目前預檢未通過。
 未提供憑證時完成程式與部署設定，但不能宣稱 Mapbox 與即時 TDX 已線上驗證。
 GitHub Pages 設為 GitHub Actions；是否已有站點及可用權限在實作後確認。
 

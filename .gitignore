@@ -3,7 +3,5 @@ phase1_result.json
 *.token
 __pycache__/
 data/
-.wrangler/
-.dev.vars
 .env
 .env.*

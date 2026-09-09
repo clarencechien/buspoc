@@ -1,56 +1,57 @@
-# 3D 公車地圖部署
+# GitHub Pages 3D 公車地圖
 
-本 branch 的 `web/` 是 GitHub Pages 前端；`worker/` 是 TDX 代理。原本研究檔案不變。
+本版本只有 `web/` 靜態前端，沒有 Cloudflare Worker、API 代理或排程資料快照。
 
-## 本機驗證
+## 使用
 
-需要 Node 20+（建議 24），無 npm 套件相依：
+1. 開啟「路線與設定」，填 Mapbox `pk.*` 公開 token。
+2. 貼上 TDX **Access Token**（可帶 Bearer 前綴），不是 Client ID / Client Secret。
+3. 按「儲存設定」。前端直接向 TDX 讀取五條路線 GPS，每 30 秒重新查詢。
+4. TDX token 只存在此頁面的 JavaScript 記憶體；不進 localStorage、sessionStorage、URL、repo 或部署檔。重新整理後需再輸入，亦可手動清除。
+5. 401 會清除記憶體 token，要求重新輸入；429 暫停至少 60 秒。部分路線失敗逐條提示；全部失敗保留上次資料並標示。
+
+A/B、路線與 Mapbox 公開 token 是可保存的本機設定；TDX token 與它們分離。
+
+## 目前直連限制（2026-09-09）
+
+實測從 `https://clarencechien.github.io` Origin 對 TDX RealTimeByFrequency/NewTaipei/57 發送 OPTIONS，要求 GET + authorization header，回傳 HTTP 401，沒有 Access-Control-Allow-Origin。瀏覽器預檢本來就不帶 Access Token，因此這個回應會阻擋標準 Authorization Bearer 跨域請求。
+
+這是 HTTP 預檢探測，尚未進行帶有效 token 的實機瀏覽器驗收。若 TDX 改為允許該 Origin 的預檢與 GET，現有前端即可運作；在目前測到的回應下，**不能宣稱純 Pages 的真實公車直連已打通**。網頁遇到這類錯誤會顯示「網路或跨網域（CORS）限制」，不把它誤報成沒有車輛。
+
+本次不加入代理、公共 CORS 轉送服務、停用瀏覽器安全設定或偽造即時資料。示範資料需使用者主動切換，會明確標示。
+
+## GitHub Actions Secret 能不能用？
+
+- **Mapbox 公開 token：可以。** Workflow 優先讀取 Actions Variable `MAPBOX_PUBLIC_TOKEN`，否則讀取同名 Secret。只接受 `pk.*`。它會進公開網頁，這是 Mapbox 公開 token 的用途，請限制使用網域。
+- **TDX Client Secret / Access Token：不注入。** Actions Secret 只在 runner 內私密；寫進靜態 JS 後便公開。Pages 沒有伺服器能私密交換或更新 TDX token。
+- Workflow 不讀取 TDX Secrets，不產生公車快照，也沒有定時 workflow。
+
+## GitHub Pages 部署
+
+1. Repo Settings → Pages → Source：GitHub Actions。
+2. 可選：設定 Variable 或 Secret `MAPBOX_PUBLIC_TOKEN`；未設定時由使用者在頁面輸入。
+3. Mapbox 公開 token 限制允許 `https://clarencechien.github.io/*`，本機另設 localhost 用途。
+4. `.github/workflows/pages.yml` 只跑測試並部署 `web/`。
+5. Workflow 通常需要先存在 default branch，才能在 Actions UI 選 branch 手動執行。本次僅更新 `feat/mapbox-3d-web`，未變更 main 或自動部署。
+6. 預期站址 `https://clarencechien.github.io/buspoc/`；同 repo Pages 只有一個站，不是每 branch 獨立站址。
+
+## 本機檢查
 
 ```sh
-npm test
+node --test
 npm run check
 python3 -m http.server 8000 --directory web
 ```
 
-開啟 localhost:8000。設定 Mapbox `pk.*` token；如只試 UI，可切換「示範資料」。示範點是合成座標，並非真實車輛或真實路線軌跡。未設定 token 時不顯示假底圖。
+無需安裝 npm 套件。用 localhost:8000 開啟，不能用 file://。
 
-## TDX 代理
+## 畫面與資料
 
-安裝 Cloudflare Wrangler 並登入帳號後：
+- 3D 地圖採 Mapbox Standard；公車為可選取標籤，不是真實比例 3D 車身模型。
+- 公車到 A 或使用者位置的球面直線距離，不是行車路徑長度或 ETA。
+- GPS 使用 TDX GPSTime；>120 秒標示過期，>=600 秒或未知時間隱藏，不推測移動。
+- 去返程依 TDX 定義，尚未判斷是否可由 A 抵達 B。
+- 改路線直接改 TDX 查詢；214直預設 Taipei，其餘預設 NewTaipei。
+- 背景暫停輪詢、返回前景更新；定位使用一次性 GPS，可再次按「定位到我」。
 
-```sh
-cd worker
-npx wrangler secret put TDX_CLIENT_ID
-npx wrangler secret put TDX_CLIENT_SECRET
-npx wrangler deploy
-```
-
-`ALLOWED_ORIGIN` 預設 `https://clarencechien.github.io`（Origin 不含 `/buspoc`）。本機驗證時改為 `http://localhost:8000`；此值只限制瀏覽器來源，不是身份驗證或防濫用保證。對外公開時可在 Cloudflare 設定 rate limiting，並監看 TDX 配額。每條路線快取 30 秒，同一 isolate 合併同時查詢；最多 10 條路線，僅允許雙北城市。不做任意 URL 代理。
-
-瀏覽器填部署後的 Worker base URL，例如 `https://buspoc-vehicles.<account>.workers.dev`，不含 `/vehicles`。GPS 使用 TDX `GPSTime`，不以抓取時間取代定位時間。單一路線失敗會標示；全數失敗保留前次成功資料並告警，不切示範資料。
-
-## GitHub Pages
-
-1. Repo Settings → Pages → Source 選 **GitHub Actions**。
-2. Settings → Secrets and variables → Actions → **Variables**，設定 `MAPBOX_PUBLIC_TOKEN` 與 `BUS_API_URL`。兩者是公開前端配置，TDX secret 不得放這裡或 web/。
-3. Mapbox token 允許 `https://clarencechien.github.io/*`；本機測試可另建 localhost 專用公開 token，權限依 Mapbox 官方 GL JS 要求配置。
-4. 此 branch 新增手動 `pages.yml`。GitHub 通常要求 workflow 先存在於 default branch 才能在 Actions UI 手動執行。可合併此 branch 後執行；若要先部署 branch，可只把 workflow 引入 main，再選 `feat/mapbox-3d-web` 執行。未經要求不在本次改動 main。
-5. 部署目標為 `https://clarencechien.github.io/buspoc/`；同一 repo 只有一個 Pages 站點，部署 branch 會更新該站，不是獨立 preview 網址。
-
-沒有 repo variables 也可部署，訪客在「路線與設定」自行填 token 與 API；設定存在自己的瀏覽器。PWA / WebAR 尚未啟用，見計畫文件。
-
-## 使用界線
-
-- 首次畫面以 A 周圍的 3D 建築為中心；「查看 A・B」顯示兩端。
-- 地圖公車是可點選圖示／標籤，並非真實比例的 3D 車身模型。
-- 公車直線距離依 A 或一次性 GPS 定位計算，不是行車路徑長度、行進方向判斷、候車推薦或 ETA。
-- 資料每 30 秒更新，背景頁暫停；位置不推測、不外插。
-- 定位 >120 秒標示過期，>=600 秒或未知時間不顯示。使用者 GPS 可重新按定位更新。
-- 目前雙向車輛，路線去返程定義由 TDX 決定，不等於 A→B。尚未加入路線 polyline、站牌 ETA 及可達性計算。
-- 3D 建築依 Mapbox 覆蓋。地圖錯誤不阻擋距離列表，亦不偽造即時結果。
-
-## 後續驗收
-
-取得真實憑證後：確認 Mapbox token 網域、3D 建築與手機效能；核對五條路線 GPS/方向；測試 TDX 429、定位拒絕、過期、切背景恢復；於 iOS/Android 驗證設定視窗與地圖點選。Node 測試不代表已做實機／真實 API 驗證。
-
-參考：[Mapbox Standard](https://docs.mapbox.com/map-styles/reference/standard/)、[3D buildings](https://docs.mapbox.com/mapbox-gl-js/example/3d-buildings/)、[TDX](https://tdx.transportdata.tw/)。
+參考：[TDX 官方授權說明](https://github.com/tdxmotc/TDX-Gitbook/blob/main/api-shi-yong/hmac.md)、[Mapbox Standard](https://docs.mapbox.com/map-styles/reference/standard/)。

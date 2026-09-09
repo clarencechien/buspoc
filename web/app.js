@@ -1,9 +1,11 @@
-import {defaults,validateSettings,distance,formatDistance,ageSeconds,demoVehicles,validPoint} from './core.js';
+import {defaults,validateSettings,distance,formatDistance,ageSeconds,demoVehicles} from './core.js';
+import {cleanToken,fetchVehicles,errorLabel} from './tdx.js';
 const $=s=>document.querySelector(s), colors=['#176ad5','#7753b5','#127b70','#b64868','#bd610d'];
-const copy=o=>structuredClone(o), key='buspoc-v1';
+const copy=o=>structuredClone(o), key='buspoc-direct-v3';
 let settings={...copy(defaults),...window.BUSPOC_CONFIG}, storageWarning='';
 try {const saved=localStorage.getItem(key);if(saved)settings=validateSettings(JSON.parse(saved));}catch{storageWarning='無法讀取已存設定，使用預設值。';}
 let map, points=[], markers=new Map(), vehicles=[], enabled=new Set(), selected=null, me=null, picking=null, controller=null, generation=0, popup=null, fetched=null, failures=[], loadError='', hasSnapshot=false;
+let tdxToken='',nextFetchAt=0;
 const routeKey=r=>r.city+':'+(r.name||r.route);
 const routeColor=v=>colors[Math.max(0,settings.routes.findIndex(r=>routeKey(r)===routeKey(v)))%colors.length];
 const message=s=>$('#map-message').textContent=s;
@@ -33,9 +35,9 @@ function ageLabel(v){const age=ageSeconds(v);return !Number.isFinite(age)?'定�
 function directionLabel(v){return v.direction===0?'去程':v.direction===1?'返程':'方向未知';}
 function focusBus(v){selected=v.id;render();if(map){map.flyTo({center:[v.lon,v.lat],zoom:16,pitch:map.getPitch(),duration:800});popup?.remove();const box=document.createElement('div'),strong=document.createElement('strong'),details=document.createElement('div');strong.textContent=`${v.route} · ${v.plate}`;details.textContent=`${directionLabel(v)}｜距${$('#reference').value==='me'?'我':' A 點'} ${formatDistance(v.meters)}（直線）｜${ageLabel(v)}`;box.append(strong,details);popup=new mapboxgl.Popup({offset:25}).setLngLat([v.lon,v.lat]).setDOMContent(box).addTo(map);}}
 function render(){
-  const demo=$('#mode').value==='demo', list=visible(), failed=failures.length?` ${failures.map(r=>r.route).join('、')} 查詢失敗。`:'';
+  const demo=$('#mode').value==='demo', list=visible(), failed=failures.length?` ${failures.map(r=>`${r.route}：${errorLabel(r.status)}`).join('；')} 查詢失敗。`:'';
   $('#status').className=demo?'demo':'';
-  $('#status').textContent=demo?'示範資料 · 非真實公車位置，不可用於候車。':!settings.api?'尚未連接即時資料。請在設定填入公車 API，或切換示範資料。':loadError?loadError+ (hasSnapshot?' 保留上次資料，請留意定位時間。':''):fetched?`${list.length} 輛可見 · ${new Date(fetched).toLocaleTimeString('zh-TW')} 取得${failed}`:'正在取得公車位置…';
+  $('#status').textContent=demo?'示範資料 · 非真實公車位置，不可用於候車。':loadError?loadError+ (hasSnapshot?' 保留上次資料，請留意定位時間。':''):fetched?`${list.length} 輛可見 · ${new Date(fetched).toLocaleTimeString('zh-TW')} 更新${failed}`:tdxToken?'正在取得公車位置…':'請到「路線與設定」輸入 TDX Access Token。';
   $('#vehicles').replaceChildren();
   if(!list.length){const p=document.createElement('p');p.className='empty';p.textContent=hasSnapshot||demo?'目前篩選下沒有可顯示的車輛。超過 10 分鐘或時間未知的定位會隱藏。':'連接資料後，這裡會依距離排列公車。';$('#vehicles').append(p);}
   for(const v of list){const stale=ageSeconds(v)>120,b=document.createElement('button');b.className='bus-card'+(selected===v.id?' selected':'');b.style.setProperty('--route',routeColor(v));const top=document.createElement('div');top.className='bus-top';const badge=document.createElement('span');badge.className='route-badge';badge.textContent=v.route;const d=document.createElement('span');d.className='bus-distance';d.textContent=formatDistance(v.meters);top.append(badge,d);const info=document.createElement('div');info.className='bus-info'+(stale?' stale':'');info.textContent=`${v.plate} · ${directionLabel(v)} · ${ageLabel(v)}${stale?' · 資料過期':''}`;b.append(top,info);b.onclick=()=>focusBus(v);$('#vehicles').append(b);}
@@ -44,20 +46,31 @@ function render(){
   for(const v of list){let marker=markers.get(v.id);if(!marker){const el=document.createElement('button');marker=new mapboxgl.Marker({element:el}).setLngLat([v.lon,v.lat]).addTo(map);markers.set(v.id,marker);}const el=marker.getElement();el.className='bus-marker'+(ageSeconds(v)>120?' stale':'')+(selected===v.id?' selected':'');el.style.setProperty('--route',routeColor(v));el.textContent=`▤ ${v.route} · ${formatDistance(v.meters)}`;el.setAttribute('aria-label',`${v.route} 公車 ${v.plate}，${formatDistance(v.meters)}`);el.onclick=e=>{e.stopPropagation();focusBus(v);};marker.setLngLat([v.lon,v.lat]);}
 }
 async function refresh(){
+  if(Date.now()<nextFetchAt&&$('#mode').value==='live'){loadError='TDX 呼叫頻率超限，暫停至少 60 秒後重試。';render();return;}
   controller?.abort();controller=new AbortController();const current=++generation;loadError='';
+  $('#refresh').disabled=false;
   if($('#mode').value==='demo'){vehicles=demoVehicles(settings);hasSnapshot=true;failures=[];render();return;}
-  if(!settings.api){vehicles=[];hasSnapshot=false;render();return;}
+  if(!tdxToken){render();return;}
   $('#refresh').disabled=true;
   const activeController=controller;
-  const timeout=setTimeout(()=>activeController.abort(),25000);
-  try {const url=new URL(settings.api.replace(/\/$/,'')+'/vehicles');url.searchParams.set('routes',JSON.stringify(settings.routes));const response=await fetch(url,{signal:controller.signal});if(!response.ok)throw Error();const data=await response.json();if(!Array.isArray(data.vehicles)||!Array.isArray(data.errors))throw Error();if(current!==generation)return;vehicles=data.vehicles.filter(v=>validPoint(v)&&typeof v.id==='string'&&typeof v.route==='string'&&settings.routes.some(r=>routeKey(r)===routeKey(v)));failures=data.errors;fetched=data.fetchedAt;hasSnapshot=true;popup?.remove();popup=null;}
-  catch{if(current!==generation)return;loadError='即時更新失敗，請檢查 API 連線。';}
+  const timeout=setTimeout(()=>activeController.abort(),20000);
+  try {
+    const data=await fetchVehicles(settings.routes,tdxToken,activeController.signal);
+    if(current!==generation)return;
+    failures=data.errors;
+    if(failures.some(e=>e.status===429))nextFetchAt=Date.now()+60000;
+    if(failures.some(e=>e.status===401)){tdxToken='';loadError=errorLabel(401);return;}
+    if(failures.length===settings.routes.length){loadError=[...new Set(failures.map(e=>errorLabel(e.status)))].join(' ');return;}
+    vehicles=data.vehicles;fetched=data.fetchedAt;hasSnapshot=true;popup?.remove();popup=null;
+  }catch{if(current!==generation)return;loadError=activeController.signal.aborted?'TDX 連線逾時，請稍後重試。':'TDX 讀取失敗，請檢查連線。';}
   finally{clearTimeout(timeout);if(current===generation){$('#refresh').disabled=false;render();}}
 }
-function fillForm(){const f=$('#settings-form');for(const p of ['origin','destination'])for(const k of ['name','lat','lon'])f.elements[p+'-'+k].value=settings[p][k];f.elements.routes.value=settings.routes.map(r=>`${r.city},${r.name}`).join('\n');f.elements.token.value=settings.token;f.elements.api.value=settings.api;$('#settings-error').textContent='';}
+function fillForm(){const f=$('#settings-form');for(const p of ['origin','destination'])for(const k of ['name','lat','lon'])f.elements[p+'-'+k].value=settings[p][k];f.elements.routes.value=settings.routes.map(r=>`${r.city},${r.name}`).join('\n');f.elements.token.value=settings.token;f.elements['tdx-token'].value='';$('#tdx-state').textContent=tdxToken?'已設定；留白會沿用，重新整理頁面後需再輸入。':'尚未設定。Token 只留在本次頁面記憶體。';$('#settings-error').textContent='';}
 function openSettings(){fillForm();$('#settings').showModal();}
 $('#settings-open').onclick=openSettings;$('#setup').onclick=openSettings;$('#settings-close').onclick=()=>$('#settings').close();
-$('#settings-form').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;try{const s={routes:f.elements.routes.value.trim().split('\n').map(line=>{const [city,name,...extra]=line.split(',').map(x=>x.trim());return {city,name:extra.length?'':name};}),token:f.elements.token.value.trim(),api:f.elements.api.value.trim()};for(const p of ['origin','destination'])s[p]={name:f.elements[p+'-name'].value.trim(),lat:Number(f.elements[p+'-lat'].value),lon:Number(f.elements[p+'-lon'].value)};validateSettings(s);const mapChanged=settings.token!==s.token;const persisted=save(s);$('#settings').close();vehicles=[];fetched=null;hasSnapshot=false;selected=null;popup?.remove();popup=null;initRoutes();updateJourney();if(mapChanged)initMap();else drawPoints();if(persisted)message('');refresh();}catch(err){$('#settings-error').textContent=err.message;}};
+$('#settings-form').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;try{const s={routes:f.elements.routes.value.trim().split('\n').map(line=>{const [city,name,...extra]=line.split(',').map(x=>x.trim());return {city,name:extra.length?'':name};}),token:f.elements.token.value.trim()};for(const p of ['origin','destination'])s[p]={name:f.elements[p+'-name'].value.trim(),lat:Number(f.elements[p+'-lat'].value),lon:Number(f.elements[p+'-lon'].value)};validateSettings(s);const mapChanged=settings.token!==s.token;const entered=f.elements['tdx-token'].value.trim();const nextToken=entered?cleanToken(entered):tdxToken;tdxToken=nextToken;f.elements['tdx-token'].value='';nextFetchAt=0;const persisted=save(s);$('#settings').close();vehicles=[];fetched=null;hasSnapshot=false;selected=null;popup?.remove();popup=null;initRoutes();updateJourney();if(mapChanged)initMap();else drawPoints();if(persisted)message('');refresh();}catch(err){$('#settings-error').textContent=err.message;}};
+$('#clear-tdx').onclick=()=>{tdxToken='';controller?.abort();generation++;$('#refresh').disabled=false;vehicles=[];hasSnapshot=false;fetched=null;failures=[];loadError='';$('#settings-form').elements['tdx-token'].value='';$('#tdx-state').textContent='已清除。';popup?.remove();render();};
+$('#settings').addEventListener('close',()=>{$('#settings-form').elements['tdx-token'].value='';});
 $('#reset').onclick=()=>{const f=$('#settings-form');for(const p of ['origin','destination'])for(const k of ['name','lat','lon'])f.elements[p+'-'+k].value=defaults[p][k];f.elements.routes.value=defaults.routes.map(r=>`${r.city},${r.name}`).join('\n');};
 document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{if(!map||!map.loaded()){$('#settings-error').textContent='請先儲存有效 token 並等待地圖載入。';return;}picking=b.dataset.pick;$('#settings').close();map.getCanvas().style.cursor='crosshair';message(`請點地圖設定 ${picking==='origin'?'A':'B'}，按 Esc 取消。`);});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&picking){picking=null;map.getCanvas().style.cursor='';message('');$('#settings').showModal();}});
