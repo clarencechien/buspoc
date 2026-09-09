@@ -12,19 +12,30 @@ export function errorLabel(status) {
   if(status==='network')return '無法連線至 TDX，可能是網路或跨網域（CORS）限制。';
   return `TDX 資料讀取失敗${typeof status==='number'?`（HTTP ${status}）`:''}。`;
 }
-export async function fetchVehicles(routes,token,signal,fetcher=fetch) {
-  validateSettings({...defaults,routes});
-  token=cleanToken(token);
-  const results=await Promise.allSettled(routes.map(async route=>{
-    const url=new URL(`https://tdx.transportdata.tw/api/basic/v2/Bus/RealTimeByFrequency/City/${route.city}/${encodeURIComponent(route.name)}`);
-    url.searchParams.set('$format','JSON');
-    let response;
-    try{response=await fetcher(url,{headers:{Authorization:`Bearer ${token}`},signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});}
-    catch(e){if(signal?.aborted)throw e;throw Object.assign(Error('Network error'),{status:'network'});}
+let queue=Promise.resolve(),lastRequest=0,cooldown=0;
+export async function tdxQuery(kind,route,token,signal,fetcher=fetch){
+  const execute=async()=>{
+    if(fetcher===fetch){
+      if(Date.now()<cooldown)throw Object.assign(Error('Rate limited'),{status:429});
+      const delay=Math.max(0,lastRequest+1600-Date.now());
+      if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+    }
+    if(signal?.aborted)throw new DOMException('Aborted','AbortError');
+    if(!['RealTimeByFrequency','StopOfRoute','Shape','EstimatedTimeOfArrival'].includes(kind))throw Error('Invalid endpoint');
+    validateSettings({...defaults,routes:[route]});
+    const url=new URL(`https://tdx.transportdata.tw/api/basic/v2/Bus/${kind}/City/${route.city}/${encodeURIComponent(route.name)}`);url.searchParams.set('$format','JSON');
+    let response;lastRequest=Date.now();
+    try{response=await fetcher(url,{headers:{Authorization:`Bearer ${cleanToken(token)}`},signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});}catch(e){if(signal?.aborted)throw e;throw Object.assign(Error('Network error'),{status:'network'});}
+    if(response.status===429&&fetcher===fetch)cooldown=Date.now()+60000;
     if(!response.ok)throw Object.assign(Error('TDX request failed'),{status:response.status});
-    const rows=await response.json();if(!Array.isArray(rows))throw Error('Invalid response');
-    return normalize(rows,route);
-  }));
+    const rows=await response.json();if(!Array.isArray(rows))throw Error('Invalid response');return rows;
+  };
+  if(fetcher!==fetch)return execute();
+  const result=queue.then(execute);queue=result.catch(()=>{});return result;
+}
+export async function fetchVehicles(routes,token,signal,fetcher=fetch) {
+  validateSettings({...defaults,routes});token=cleanToken(token);
+  const results=await Promise.allSettled(routes.map(async route=>normalize(await tdxQuery('RealTimeByFrequency',route,token,signal,fetcher),route)));
   if(signal?.aborted)throw new DOMException('Aborted','AbortError');
   const vehicles=[],errors=[];
   results.forEach((r,i)=>{if(r.status==='fulfilled')vehicles.push(...r.value);else errors.push({route:routes[i].name,city:routes[i].city,status:r.reason?.status||'invalid'});});
