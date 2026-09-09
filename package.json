@@ -1,1 +1,1 @@
-{"name":"buspoc-map","private":true,"type":"module","scripts":{"test":"node --test","check":"node --check web/app.js && node --check web/core.js && node --check web/tdx.js"}}
+{"name":"buspoc-map","private":true,"type":"module","scripts":{"test":"node --test","check":"node --check web/app.js && node --check web/core.js && node --check web/tdx.js && node --check web/corridor.js && node --check web/route-view.js && node --check web/buses3d.js"}}
