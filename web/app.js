@@ -1,3 +1,5 @@
+import {tokenKey,exportBackup,importBackup} from './storage.js';
+import {setupWeather} from './weather.js';
 import {defaults,validateSettings,distance,formatDistance,ageSeconds,demoVehicles} from './core.js';
 import {createBusLayer} from './buses3d.js';
 import {palette} from './corridor.js';
@@ -8,7 +10,9 @@ const copy=o=>structuredClone(o), key='buspoc-direct-v3';
 let settings={...copy(defaults),...window.BUSPOC_CONFIG}, storageWarning='';
 try {const saved=localStorage.getItem(key);if(saved)settings=validateSettings(JSON.parse(saved));}catch{storageWarning='無法讀取已存設定，使用預設值。';}
 let map, points=[], markers=new Map(), vehicles=[], enabled=new Set(), selected=null, me=null, picking=null, controller=null, generation=0, popup=null, fetched=null, failures=[], loadError='', hasSnapshot=false;
-let tdxToken='',nextFetchAt=0,busLayer=null,corridor=null,sceneIndex=0;
+let tdxToken='',weather=null,nextFetchAt=0,busLayer=null,corridor=null,sceneIndex=0;
+try{tdxToken=localStorage.getItem(tokenKey)||'';}catch{}
+function persistToken(){try{if(tdxToken)localStorage.setItem(tokenKey,tdxToken);else localStorage.removeItem(tokenKey);}catch{message('無法保存 TDX Token，這次僅存於頁面記憶體。');}}
 const routeKey=r=>r.city+':'+(r.name||r.route);
 const routeColor=v=>palette[v.name||v.route]||colors[Math.max(0,settings.routes.findIndex(r=>routeKey(r)===routeKey(v)))%colors.length];
 const message=s=>$('#map-message').textContent=s;
@@ -47,7 +51,7 @@ function render(){
   if(!list.length){const p=document.createElement('p');p.className='empty';p.textContent=hasSnapshot||demo?'目前篩選下沒有可顯示的車輛。超過 10 分鐘或時間未知的定位會隱藏。':'連接資料後，這裡會依距離排列公車。';$('#vehicles').append(p);}
   for(const [rank,v] of list.entries()){const stale=ageSeconds(v)>120,b=document.createElement('button');b.className='bus-card'+(selected===v.id?' selected':'');b.style.setProperty('--route',routeColor(v));const top=document.createElement('div');top.className='bus-top';const badge=document.createElement('span');badge.className='route-badge';badge.textContent=(rank<3?`${rank+1} · `:'')+v.route;const d=document.createElement('span');d.className='bus-distance';d.textContent=formatDistance(v.meters);top.append(badge,d);const info=document.createElement('div');info.className='bus-info'+(stale?' stale':'');info.textContent=`${v.plate} · ${directionLabel(v)} · ${ageLabel(v)}${stale?' · 資料過期':''}`;b.append(top,info);b.onclick=()=>focusBus(v);$('#vehicles').append(b);}
   if(!map)return;
-  busLayer?.update(list.slice(0,30),reference(),routeColor);
+  busLayer?.update(list.slice(0,30),reference(),routeColor,[settings.origin,settings.destination]);
   const ids=new Set(list.map(v=>v.id));for(const [id,m] of markers)if(!ids.has(id)){m.remove();markers.delete(id);}
   for(const [rank,v] of list.entries()){let marker=markers.get(v.id);if(!marker){const el=document.createElement('button');marker=new mapboxgl.Marker({element:el,offset:[0,-30]}).setLngLat([v.lon,v.lat]).addTo(map);markers.set(v.id,marker);}const el=marker.getElement();el.className='bus-marker'+(ageSeconds(v)>120?' stale':'')+(selected===v.id?' selected':'');el.style.setProperty('--route',routeColor(v));el.textContent=`${rank<3?'❶❷❸'[rank]:'▤'} ${v.route} · ${formatDistance(v.meters)}`;el.classList.toggle('nearest',rank<3);el.setAttribute('aria-label',`${v.route} 公車 ${v.plate}，${formatDistance(v.meters)}`);el.onclick=e=>{e.stopPropagation();focusBus(v);};marker.setLngLat([v.lon,v.lat]);}
 }
@@ -65,17 +69,17 @@ async function refresh(){
     if(current!==generation)return;
     failures=data.errors;
     if(failures.some(e=>e.status===429))nextFetchAt=Date.now()+60000;
-    if(failures.some(e=>e.status===401)){tdxToken='';loadError=errorLabel(401);return;}
+    if(failures.some(e=>e.status===401)){tdxToken='';persistToken();loadError=errorLabel(401);return;}
     if(failures.length===settings.routes.filter(r=>enabled.has(routeKey(r))).length){loadError=[...new Set(failures.map(e=>errorLabel(e.status)))].join(' ');return;}
     vehicles=data.vehicles;fetched=data.fetchedAt;hasSnapshot=true;popup?.remove();popup=null;
   }catch{if(current!==generation)return;loadError=activeController.signal.aborted?'TDX 連線逾時，請稍後重試。':'TDX 讀取失敗，請檢查連線。';}
   finally{clearTimeout(timeout);if(current===generation){$('#refresh').disabled=false;render();}}
 }
-function fillForm(){const f=$('#settings-form');for(const p of ['origin','destination'])for(const k of ['name','lat','lon'])f.elements[p+'-'+k].value=settings[p][k];f.elements.routes.value=settings.routes.map(r=>`${r.city},${r.name}`).join('\n');f.elements.token.value=settings.token;f.elements['tdx-token'].value='';$('#tdx-state').textContent=tdxToken?'已設定；留白會沿用，重新整理頁面後需再輸入。':'尚未設定。Token 只留在本次頁面記憶體。';$('#settings-error').textContent='';}
+function fillForm(){const f=$('#settings-form');for(const p of ['origin','destination'])for(const k of ['name','lat','lon'])f.elements[p+'-'+k].value=settings[p][k];f.elements.routes.value=settings.routes.map(r=>`${r.city},${r.name}`).join('\n');f.elements.token.value=settings.token;f.elements['tdx-token'].value='';$('#tdx-state').textContent=tdxToken?'已保存於此瀏覽器；留白會沿用，過期後需更新。':'尚未設定。儲存後會保留於此瀏覽器。';$('#settings-error').textContent='';}
 function openSettings(){fillForm();$('#settings').showModal();}
 $('#settings-open').onclick=openSettings;$('#setup').onclick=openSettings;$('#settings-close').onclick=()=>$('#settings').close();
-$('#settings-form').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;try{const s={routes:f.elements.routes.value.trim().split('\n').map(line=>{const [city,name,...extra]=line.split(',').map(x=>x.trim());return {city,name:extra.length?'':name};}),token:f.elements.token.value.trim()};for(const p of ['origin','destination'])s[p]={name:f.elements[p+'-name'].value.trim(),lat:Number(f.elements[p+'-lat'].value),lon:Number(f.elements[p+'-lon'].value)};validateSettings(s);const mapChanged=settings.token!==s.token;const entered=f.elements['tdx-token'].value.trim();const nextToken=entered?cleanToken(entered):tdxToken;tdxToken=nextToken;f.elements['tdx-token'].value='';nextFetchAt=0;const persisted=save(s);$('#settings').close();vehicles=[];fetched=null;hasSnapshot=false;selected=null;popup?.remove();popup=null;initRoutes();updateJourney();corridor?.configure();if(mapChanged)initMap();else drawPoints();if(persisted)message('');refresh();}catch(err){$('#settings-error').textContent=err.message;}};
-$('#clear-tdx').onclick=()=>{tdxToken='';controller?.abort();generation++;$('#refresh').disabled=false;vehicles=[];hasSnapshot=false;fetched=null;failures=[];loadError='';$('#settings-form').elements['tdx-token'].value='';$('#tdx-state').textContent='已清除。';corridor?.reset();popup?.remove();render();};
+$('#settings-form').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;try{const s={routes:f.elements.routes.value.trim().split('\n').map(line=>{const [city,name,...extra]=line.split(',').map(x=>x.trim());return {city,name:extra.length?'':name};}),token:f.elements.token.value.trim()};for(const p of ['origin','destination'])s[p]={name:f.elements[p+'-name'].value.trim(),lat:Number(f.elements[p+'-lat'].value),lon:Number(f.elements[p+'-lon'].value)};validateSettings(s);const mapChanged=settings.token!==s.token;const entered=f.elements['tdx-token'].value.trim();const nextToken=entered?cleanToken(entered):tdxToken;tdxToken=nextToken;persistToken();f.elements['tdx-token'].value='';nextFetchAt=0;const persisted=save(s);$('#settings').close();vehicles=[];fetched=null;hasSnapshot=false;selected=null;popup?.remove();popup=null;initRoutes();updateJourney();corridor?.configure();if(mapChanged)initMap();else drawPoints();if(persisted)message('');weather?.update();refresh();}catch(err){$('#settings-error').textContent=err.message;}};
+$('#clear-tdx').onclick=()=>{tdxToken='';persistToken();controller?.abort();generation++;$('#refresh').disabled=false;vehicles=[];hasSnapshot=false;fetched=null;failures=[];loadError='';$('#settings-form').elements['tdx-token'].value='';$('#tdx-state').textContent='已清除。';corridor?.reset();popup?.remove();render();};
 $('#settings').addEventListener('close',()=>{$('#settings-form').elements['tdx-token'].value='';});
 $('#reset').onclick=()=>{const f=$('#settings-form');for(const p of ['origin','destination'])for(const k of ['name','lat','lon'])f.elements[p+'-'+k].value=defaults[p][k];f.elements.routes.value=defaults.routes.map(r=>`${r.city},${r.name}`).join('\n');};
 document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{if(!map||!map.loaded()){$('#settings-error').textContent='請先儲存有效 token 並等待地圖載入。';return;}picking=b.dataset.pick;$('#settings').close();map.getCanvas().style.cursor='crosshair';message(`請點地圖設定 ${picking==='origin'?'A':'B'}，按 Esc 取消。`);});
@@ -89,4 +93,7 @@ setInterval(()=>{if(!document.hidden)render();},10000);
 $('#nearest-only').onchange=render;
 $('#nearest-fit').onclick=()=>{if(!map)return;const top=visible().slice(0,3);if(!top.length){message('目前沒有可用公車位置。');return;}const b=new mapboxgl.LngLatBounds();b.extend([reference().lon,reference().lat]);top.forEach(v=>b.extend([v.lon,v.lat]));map.fitBounds(b,{padding:90,maxZoom:16.5,pitch:60});};
 $('#scene-toggle').onclick=()=>{if(!map)return;sceneIndex=(sceneIndex+1)%3;map.setConfigProperty('basemap','lightPreset',['day','dusk','night'][sceneIndex]);$('#scene-toggle').textContent=['黃昏景色','夜間景色','日間景色'][sceneIndex];};
-initRoutes();updateJourney();corridor=setupCorridor(()=>settings,()=>tdxToken,()=>map,routeColor,status=>{if(status===429)nextFetchAt=Date.now()+60000;});initMap();render();refresh();if(storageWarning)message(storageWarning);
+$('#export-backup').onclick=()=>{try{const data=exportBackup(localStorage,settings,tdxToken,$('#export-token').checked);const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='buspoc-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('#backup-status').textContent='已匯出設定、載入的路線與站點選擇。'+(data.tdxToken?' 此檔案包含授權 Token，請自行保管。':' 未包含 TDX Token。');}catch{$('#backup-status').textContent='無法讀取備份資料。';}};
+$('#import-backup').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>10000000)throw Error('備份檔不能超過 10MB。');const data=importBackup(localStorage,JSON.parse(await file.text()));settings=data.settings;if(data.tdxToken)tdxToken=data.tdxToken;persistToken();vehicles=[];hasSnapshot=false;fetched=null;initRoutes();updateJourney();initMap();corridor.configure();weather.update();fillForm();$('#backup-status').textContent='匯入完成，已套用設定與路線。';refresh();}catch(err){$('#backup-status').textContent=err.message;}finally{e.target.value='';}};
+weather=setupWeather(()=>settings.origin);weather.update();
+initRoutes();updateJourney();corridor=setupCorridor(()=>settings,()=>tdxToken,()=>map,routeColor,status=>{if(status===401){tdxToken='';persistToken();}if(status===429)nextFetchAt=Date.now()+60000;});initMap();render();refresh();if(storageWarning)message(storageWarning);

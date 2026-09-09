@@ -1,28 +1,31 @@
 import {tdxQuery,errorLabel} from './tdx.js';
-import {parseLine,clipLine,chooseStops,stopPoint,etaText} from './corridor.js';
+import {matchShape,chooseStops,stopPoint,etaText} from './corridor.js';
+import {selectionKey} from './storage.js';
 import {distance,validPoint} from './core.js';
 const $=s=>document.querySelector(s),empty=()=>({type:'FeatureCollection',features:[]});
 export function setupCorridor(getSettings,getToken,getMap,colorOf,onError){
-  let records=[],shapes=[],activeStops=[],line=[],currentRoute=null,controller=null,version=0;
+  let records=[],shapes=[],activeStops=[],line=[],currentRoute=null,controller=null,version=0,stopMarkers=[];
   let pins=null;fetch('./commute-stops.json').then(r=>r.json()).then(d=>pins=d).catch(()=>{});
-  function clearMap(){const m=getMap();for(const id of ['commute-line','commute-stops'])m?.getSource(id)?.setData(empty());line=[];}
+  function clearMap(){stopMarkers.forEach(m=>m.remove());stopMarkers=[];const m=getMap();for(const id of ['commute-line','commute-stops'])m?.getSource(id)?.setData(empty());line=[];}
   function draw(){
     const m=getMap();if(!m?.isStyleLoaded()||!activeStops.length||!currentRoute)return;
     const a=Number($('#board-stop').value),b=Number($('#alight-stop').value);clearMap();
     if(b<=a){$('#corridor-status').textContent='下車站必須位於上車站之後，請調整站點或方向。';return;}
     const direction=Number($('#corridor-direction').value),record=records.find(r=>r.Direction===direction&&r.Stops===activeStops);
-    const candidates=shapes.filter(r=>r.Direction===direction&&(!record?.SubRouteUID||r.SubRouteUID===record.SubRouteUID));
-    for(const c of candidates){line=clipLine(parseLine(c.Geometry),stopPoint(activeStops[a]),stopPoint(activeStops[b]));if(line.length)break;}
+    line=matchShape(shapes,record||{Direction:direction},activeStops.slice(a,b+1));
     const color=colorOf(currentRoute);
     const routeData={type:'FeatureCollection',features:line.length?[{type:'Feature',properties:{color},geometry:{type:'LineString',coordinates:line}}]:[]};
     const stopsData={type:'FeatureCollection',features:activeStops.slice(a,b+1).map((s,i)=>({type:'Feature',properties:{color,label:i===0?'上車 · '+s.StopName.Zh_tw:i===b-a?'下車 · '+s.StopName.Zh_tw:s.StopName.Zh_tw,edge:i===0||i===b-a},geometry:{type:'Point',coordinates:[stopPoint(s).lon,stopPoint(s).lat]}}))};
     if(!m.getSource('commute-line')){
       m.addSource('commute-line',{type:'geojson',data:empty()});m.addSource('commute-stops',{type:'geojson',data:empty()});
-      m.addLayer({id:'commute-glow',type:'line',slot:'middle',source:'commute-line',paint:{'line-color':['get','color'],'line-width':18,'line-opacity':.2,'line-blur':5}});
-      m.addLayer({id:'commute-path',type:'line',slot:'middle',source:'commute-line',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':['get','color'],'line-width':6,'line-opacity':.95}});
+      m.addLayer({id:'commute-glow',type:'line',slot:'top',source:'commute-line',paint:{'line-color':['get','color'],'line-width':24,'line-opacity':.45,'line-blur':5}});
+      m.addLayer({id:'commute-outline',type:'line',slot:'top',source:'commute-line',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#fff','line-width':14}});
+      m.addLayer({id:'commute-path',type:'line',slot:'top',source:'commute-line',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':['get','color'],'line-width':9,'line-opacity':1,'line-emissive-strength':1}});
       m.addLayer({id:'commute-stop-dots',type:'circle',slot:'top',source:'commute-stops',paint:{'circle-radius':['case',['get','edge'],8,4],'circle-color':['get','color'],'circle-stroke-color':'#ffffff','circle-stroke-width':2}});
       m.addLayer({id:'commute-stop-labels',type:'symbol',slot:'top',source:'commute-stops',layout:{'text-field':['get','label'],'text-size':13,'text-offset':[0,1.5]},paint:{'text-color':['get','color'],'text-halo-color':'#fff','text-halo-width':2}});
     }
+    for(const [index,label] of [[a,'上車'],[b,'下車']]){const stop=activeStops[index],el=document.createElement('div');el.className='stop-flag';el.style.setProperty('--route',color);el.textContent=label+' · '+stop.StopName.Zh_tw;stopMarkers.push(new mapboxgl.Marker({element:el,anchor:'bottom',offset:[0,-12]}).setLngLat([stopPoint(stop).lon,stopPoint(stop).lat]).addTo(m));}
+    try{localStorage.setItem(selectionKey,JSON.stringify({route:currentRoute.city+':'+currentRoute.name,direction,board:activeStops[a].StopUID,alight:activeStops[b].StopUID,od:JSON.stringify([getSettings().origin,getSettings().destination])}));}catch{}
     m.getSource('commute-line').setData(routeData);m.getSource('commute-stops').setData(stopsData);
     $('#corridor-status').textContent=`${currentRoute.name} · ${activeStops[a].StopName.Zh_tw} → ${activeStops[b].StopName.Zh_tw} · ${b-a+1} 站。${line.length?'實際路線區段。':'未取得可匹配的道路線形；僅顯示站點。'}`;
   }
@@ -36,15 +39,16 @@ export function setupCorridor(getSettings,getToken,getMap,colorOf,onError){
     if(isOriginal&&board&&alight){activeStops=candidates.find(r=>r.Stops.some(s=>s.StopUID===board.StopUID)&&r.Stops.some(s=>s.StopUID===alight.StopUID))?.Stops||activeStops;}
     for(const id of ['board-stop','alight-stop']){$('#'+id).replaceChildren(...activeStops.map((s,i)=>new Option(`${i+1} · ${s.StopName.Zh_tw}`,String(i))));$('#'+id).disabled=!activeStops.length;}
     const pair=chooseStops(activeStops,settings.origin,settings.destination,isOriginal&&board&&alight?{board:board.StopUID,alight:alight.StopUID}:null);
-    if(pair){$('#board-stop').value=pair[0];$('#alight-stop').value=pair[1];draw();}else{$('#corridor-status').textContent='此方向沒有可用站點，請切換方向。';clearMap();}
+    if(pair){$('#board-stop').value=pair[0];$('#alight-stop').value=pair[1];try{const saved=JSON.parse(localStorage.getItem(selectionKey)||'null');if(saved?.route===currentRoute.city+':'+currentRoute.name&&Number(saved.direction)===direction&&saved.od===JSON.stringify([settings.origin,settings.destination])){const a=activeStops.findIndex(s=>s.StopUID===saved.board),b=activeStops.findIndex(s=>s.StopUID===saved.alight);if(a>=0&&b>a){$('#board-stop').value=a;$('#alight-stop').value=b;}}}catch{}draw();}else{$('#corridor-status').textContent='此方向沒有可用站點，請切換方向。';clearMap();}
     $('#eta-status').textContent='站點變更後請重新查詢到站預估。';
   }
   function reset(){version++;controller?.abort();records=[];shapes=[];activeStops=[];currentRoute=null;clearMap();for(const id of ['board-stop','alight-stop']){$('#'+id).replaceChildren();$('#'+id).disabled=true;}$('#corridor-status').textContent='請載入所選路線，站點與線形會快取 24 小時。';$('#eta-status').textContent='到站預估需另查，不等於車輛距離排名。';$('#load-corridor').disabled=false;$('#get-eta').disabled=false;}
-  function configure(){reset();$('#corridor-route').replaceChildren(...getSettings().routes.map((r,i)=>new Option(r.name,String(i))));$('#corridor-route').value=String(Math.max(0,getSettings().routes.findIndex(r=>r.name==='706')));}
+  function configure(){reset();$('#corridor-route').replaceChildren(...getSettings().routes.map((r,i)=>new Option(r.name,String(i))));$('#corridor-route').value=String(Math.max(0,getSettings().routes.findIndex(r=>r.name==='706')));try{const saved=JSON.parse(localStorage.getItem(selectionKey)||'null');const i=getSettings().routes.findIndex(r=>r.city+':'+r.name===saved?.route);if(i>=0){$('#corridor-route').value=i;$('#corridor-direction').value=saved.direction;if(localStorage.getItem('buspoc-route-v1:'+saved.route))$('#load-corridor').click();}}catch{}}
+
   $('#load-corridor').onclick=async()=>{
     reset();const route=getSettings().routes[Number($('#corridor-route').value)];if(!route)return;
     const token=getToken(),id=version;currentRoute=route;const cacheKey='buspoc-route-v1:'+route.city+':'+route.name;
-    try{const cached=JSON.parse(localStorage.getItem(cacheKey)||'null');if(cached&&Date.now()-cached.time<86400000){records=cached.records;shapes=cached.shapes;stationOptions();return;}}catch{}
+    try{const cached=JSON.parse(localStorage.getItem(cacheKey)||'null');if(cached&&Array.isArray(cached.records)&&Array.isArray(cached.shapes)){records=cached.records;shapes=cached.shapes;stationOptions();if(Date.now()-cached.time>86400000)$('#corridor-status').textContent+=' 快取超過一天，建議更新路線。';return;}}catch{}
     if(!token){$('#corridor-status').textContent='請先在設定輸入 TDX Token。';return;}
     controller=new AbortController();const activeController=controller;const signal=activeController.signal;const timer=setTimeout(()=>activeController.abort(),45000);$('#load-corridor').disabled=true;$('#corridor-status').textContent='正在依序讀取站點與路線…';
     try{
@@ -56,6 +60,7 @@ export function setupCorridor(getSettings,getToken,getMap,colorOf,onError){
     }catch(e){if(id===version){$('#corridor-status').textContent=errorLabel(e.status);onError(e.status);}}
     finally{clearTimeout(timer);if(id===version)$('#load-corridor').disabled=false;}
   };
+  $('#reload-corridor').onclick=()=>{const r=getSettings().routes[Number($('#corridor-route').value)];if(r){try{localStorage.removeItem('buspoc-route-v1:'+r.city+':'+r.name);}catch{}$('#load-corridor').click();}};
   $('#corridor-route').onchange=reset;$('#corridor-direction').onchange=()=>{version++;controller?.abort();$('#get-eta').disabled=false;$('#load-corridor').disabled=false;stationOptions();};
   for(const id of ['board-stop','alight-stop'])$('#'+id).onchange=()=>{version++;controller?.abort();$('#get-eta').disabled=false;$('#eta-status').textContent='站點變更後請重新查詢到站預估。';draw();};
   $('#route-fit').onclick=()=>{if(!line.length)return;const m=getMap();if(m)m.fitBounds(line.reduce((b,p)=>b.extend(p),new mapboxgl.LngLatBounds()),{padding:80,maxZoom:16,pitch:55});};

@@ -10,6 +10,35 @@ export function project(point,line){let best={gap:Infinity,along:0,index:0,t:0},
 }
 export function clipLine(line,start,end){if(line.length<2)return [];const a=project(start,line),b=project(end,line);if(a.gap>150||b.gap>150||b.along<=a.along)return [];return [a.coord,...line.slice(a.index+1,b.index+1),b.coord];}
 export function stopPoint(s){return {lat:s.StopPosition?.PositionLat,lon:s.StopPosition?.PositionLon};}
+export function geometryLines(wkt){
+  const text=String(wkt||'').replace(/^SRID=\d+;/i,'').trim();
+  if(/^MULTILINESTRING/i.test(text))return [...text.matchAll(/\(([^()]+)\)/g)].map(m=>parseLine('LINESTRING ('+m[1]+')')).filter(l=>l.length);
+  const single=parseLine(text);return single.length?[single]:[];
+}
+export function matchShape(shapes,record,stops){
+  if(stops.length<2)return [];
+  const start=stopPoint(stops[0]),end=stopPoint(stops.at(-1));let best=[],score=Infinity;
+  for(const shape of shapes){
+    if(shape.Direction!=null&&Number(shape.Direction)!==Number(record.Direction))continue;
+    if(shape.RouteUID&&record.RouteUID&&shape.RouteUID!==record.RouteUID)continue;
+    // Shape may only carry RouteUID, while StopOfRoute carries SubRouteUID.
+    if(shape.SubRouteUID&&record.SubRouteUID&&shape.SubRouteUID!==record.SubRouteUID)continue;
+    const parts=geometryLines(shape.Geometry);
+    // Merge only touching pieces; do not bridge missing road geometry.
+    for(let i=0;i<parts.length;i++)for(let j=i+1;j<parts.length;j++){
+      const a=parts[i],b=parts[j];if(!a.length||!b.length)continue;
+      const gap=(p,q)=>distance({lon:p[0],lat:p[1]},{lon:q[0],lat:q[1]});
+      if(gap(a.at(-1),b[0])<3){parts[i]=a.concat(b.slice(1));parts[j]=[];j=i;}
+      else if(gap(a.at(-1),b.at(-1))<3){parts[i]=a.concat([...b].reverse().slice(1));parts[j]=[];j=i;}
+    }
+    for(const part of parts)for(const candidate of [part,[...part].reverse()]){
+      const clipped=clipLine(candidate,start,end);if(!clipped.length)continue;
+      let previous=-1,total=0,valid=true;
+      for(const stop of stops){const p=project(stopPoint(stop),candidate);if(p.gap>150||p.along<previous-30){valid=false;break;}previous=p.along;total+=p.gap;}
+      if(valid&&total<score){score=total;best=clipped;}
+    }
+  }return best;
+}
 export function chooseStops(stops,origin,dest,pinned){
   if(pinned){const a=stops.findIndex(s=>s.StopUID===pinned.board),b=stops.findIndex(s=>s.StopUID===pinned.alight);if(a>=0&&b>a)return [a,b];}
   let best=Infinity,pair=null;for(let i=0;i<stops.length;i++)for(let j=i+1;j<stops.length;j++){const d=distance(origin,stopPoint(stops[i]))+distance(dest,stopPoint(stops[j]));if(d<best){best=d;pair=[i,j];}}return pair;

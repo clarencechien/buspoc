@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseLine,clipLine,chooseStops,etaText,palette} from '../web/corridor.js';
+import {parseLine,clipLine,chooseStops,etaText,palette,matchShape} from '../web/corridor.js';
 test('route clipping follows road vertices and rejects reverse or distant matches',()=>{
   const road=parseLine('LINESTRING (121 25, 121.001 25, 121.001 25.002, 121.003 25.002)');
   const segment=clipLine(road,{lon:121.0005,lat:25},{lon:121.002,lat:25.002});
@@ -17,4 +17,12 @@ test('station selection preserves route direction and pinned per-route UIDs',()=
 test('ETA uses matching stop and direction, excludes unavailable service',()=>{
   const rows=[{StopUID:'S',Direction:0,StopStatus:0,EstimateTime:130},{StopUID:'S',Direction:1,StopStatus:0,EstimateTime:10},{StopUID:'S',Direction:0,StopStatus:1,EstimateTime:0}];
   assert.match(etaText(rows,{StopUID:'S'},0),/3 分鐘/);assert.match(etaText(rows,{StopUID:'other'},0),/暫無/);
+});
+test('Shape without SubRouteUID and reversed multipart geometry still draws a road',()=>{
+  const stops=[121,121.001,121.002].map(lon=>({StopPosition:{PositionLon:lon,PositionLat:25}}));
+  const record={Direction:0,RouteUID:'R',SubRouteUID:'R0'};
+  const shape={RouteUID:'R',Geometry:'MULTILINESTRING ((121.002 25,121.001 25),(121.001 25,121 25))'};
+  assert.ok(matchShape([shape],record,stops).length>=3);
+  assert.deepEqual(matchShape([{...shape,Direction:1}],record,stops),[]);
+  assert.deepEqual(matchShape([{...shape,RouteUID:'OTHER'}],record,stops),[]);
 });

@@ -8,7 +8,7 @@
 - [部署與使用說明](docs/MAPBOX_SETUP.md)：Mapbox token、瀏覽器輸入 TDX Access Token、GitHub Pages。
 - `node --test` 執行測試；`python3 -m http.server 8000 --directory web` 本機開啟。
 
-僅 GitHub Pages，TDX token 由網頁輸入且只存記憶體，不需要 Cloudflare。使用者瀏覽器已回報真實車牌/GPS，仍需依環境處理授權、CORS 與 429 限流；示範模式有明確標示。距離不是 ETA，目前不做 A→B 路線推薦。下方保留原始研究結論，這次地圖是新增的視覺化方向。
+僅 GitHub Pages，TDX token 由網頁輸入且存於 localStorage，支援備份匯入／匯出，不需要 Cloudflare。使用者瀏覽器已回報真實車牌/GPS，仍需依環境處理授權、CORS 與 429 限流；示範模式有明確標示。距離不是 ETA，目前不做 A→B 路線推薦。下方保留原始研究結論，這次地圖是新增的視覺化方向。
 
 用真實 TDX 資料回答一個限縮到極致的問題:
 **下班走出銀行,該走連城路軸(57/706/243/214直)還是錦和路軸(橘3)?該停哪一站?**
