@@ -1,5 +1,15 @@
 # buspoc — 中和→永和 下班公車決策 POC
 
+## 3D 公車地圖（此 branch 新增）
+
+新增 GitHub Pages 靜態網頁 `web/`：Mapbox 3D 建築、公車定位標籤與直線距離、可修改路線及 A/B 點、定位與方向篩選。預設 57 / 706 / 243 / 214直 / 橘3。
+
+- [分階段計畫](docs/MAPBOX_3D_PLAN.md)：先 Web，再 PWA / WebAR。
+- [部署與使用說明](docs/MAPBOX_SETUP.md)：Mapbox token、TDX Worker、GitHub Pages。
+- `node --test` 執行測試；`python3 -m http.server 8000 --directory web` 本機開啟。
+
+即時資料需部署 TDX 代理並設定憑證；示範模式有明確標示。距離不是 ETA，目前不做 A→B 路線推薦。下方保留原始研究結論，這次地圖是新增的視覺化方向。
+
 用真實 TDX 資料回答一個限縮到極致的問題:
 **下班走出銀行,該走連城路軸(57/706/243/214直)還是錦和路軸(橘3)?該停哪一站?**
 
